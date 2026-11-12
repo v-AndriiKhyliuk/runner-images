@@ -81,7 +81,7 @@ variable "ram_size" {
 
 variable "image_os" {
   type    = string
-  default = "macos13"
+  default = "macos27"
 }
 
 source "veertu-anka-vm-clone" "template" {
@@ -149,7 +149,7 @@ build {
 
   provisioner "file" {
     destination = "${local.image_folder}/toolset.json"
-    source      = "${path.root}/../toolsets/toolset-13.json"
+    source      = "${path.root}/../toolsets/toolset-xcode-27.json"
   }
 
   provisioner "shell" {
@@ -158,7 +158,7 @@ build {
       "mv ${local.image_folder}/docs-gen ${local.image_folder}/software-report",
       "mkdir ~/utils",
       "mv ${local.image_folder}/helpers/invoke-tests.sh ~/utils",
-      "mv ${local.image_folder}/helpers/utils.sh ~/utils",
+      "mv ${local.image_folder}/helpers/utils.sh ~/utils"
     ]
   }
 
@@ -166,7 +166,8 @@ build {
     execute_command = "chmod +x {{ .Path }}; source $HOME/.bash_profile; {{ .Vars }} {{ .Path }}"
     scripts         = [
       "${path.root}/../scripts/build/install-xcode-clt.sh",
-      "${path.root}/../scripts/build/install-homebrew.sh"
+      "${path.root}/../scripts/build/install-homebrew.sh",
+      "${path.root}/../scripts/build/install-rosetta.sh"
     ]
   }
 
@@ -174,7 +175,7 @@ build {
     environment_vars = ["PASSWORD=${var.vm_password}", "USERNAME=${var.vm_username}"]
     execute_command  = "chmod +x {{ .Path }}; source $HOME/.bash_profile; sudo {{ .Vars }} {{ .Path }}"
     scripts          = [
-      "${path.root}/../scripts/build/configure-tccdb-macos.sh",
+      "${path.root}/../scripts/build/configure-tccdb-macos-27.sh",
       "${path.root}/../scripts/build/configure-autologin.sh",
       "${path.root}/../scripts/build/configure-auto-updates.sh",
       "${path.root}/../scripts/build/configure-ntpconf.sh",
@@ -183,7 +184,7 @@ build {
   }
 
   provisioner "shell" {
-    environment_vars = ["IMAGE_VERSION=${var.build_id}", "IMAGE_OS=${var.image_os}", "PASSWORD=${var.vm_password}"]
+    environment_vars = ["IMAGE_VERSION=${var.build_id}", "IMAGE_OS=${var.image_os}", "IMAGE_LABEL_OVERRIDE=xcode-27-arm64", "PASSWORD=${var.vm_password}"]
     execute_command  = "chmod +x {{ .Path }}; source $HOME/.bash_profile; {{ .Vars }} {{ .Path }}"
     scripts          = [
       "${path.root}/../scripts/build/configure-preimagedata.sh",
@@ -203,20 +204,16 @@ build {
     execute_command  = "chmod +x {{ .Path }}; source $HOME/.bash_profile; {{ .Vars }} {{ .Path }}"
     pause_before     = "30s"
     scripts          = [
-      "${path.root}/../scripts/build/install-rosetta.sh",
       "${path.root}/../scripts/build/configure-windows.sh",
       "${path.root}/../scripts/build/install-powershell.sh",
-      "${path.root}/../scripts/build/install-mono.sh",
       "${path.root}/../scripts/build/install-dotnet.sh",
       "${path.root}/../scripts/build/install-python.sh",
       "${path.root}/../scripts/build/install-azcopy.sh",
-      "${path.root}/../scripts/build/install-openssl.sh",
       "${path.root}/../scripts/build/install-ruby.sh",
       "${path.root}/../scripts/build/install-rubygems.sh",
       "${path.root}/../scripts/build/install-git.sh",
       "${path.root}/../scripts/build/install-node.sh",
-      "${path.root}/../scripts/build/install-common-utils.sh",
-      "${path.root}/../scripts/build/install-unxip.sh"
+      "${path.root}/../scripts/build/install-common-utils.sh"
     ]
   }
 
@@ -244,6 +241,7 @@ build {
       "${path.root}/../scripts/build/install-gcc.sh",
       "${path.root}/../scripts/build/install-cocoapods.sh",
       "${path.root}/../scripts/build/install-android-sdk.sh",
+      "${path.root}/../scripts/build/install-vcpkg.sh",
       "${path.root}/../scripts/build/install-safari.sh",
       "${path.root}/../scripts/build/install-chrome.sh",
       "${path.root}/../scripts/build/install-firefox.sh",
@@ -270,17 +268,35 @@ build {
 
   provisioner "shell" {
     environment_vars = ["IMAGE_FOLDER=${local.image_folder}"]
+    execute_command  = "chmod +x {{ .Path }}; source $HOME/.bash_profile; {{ .Vars }} {{ .Path }}"
+    script           = "${path.root}/../scripts/build/install-openssl.sh"
+  }
+
+  provisioner "shell" {
+    environment_vars = ["IMAGE_FOLDER=${local.image_folder}"]
+    execute_command  = "chmod +x {{ .Path }}; source $HOME/.bash_profile; {{ .Vars }} {{ .Path }}"
+    script           = "${path.root}/../scripts/build/remove-emudhra-certs.sh"
+  }
+
+  provisioner "shell" {
+    environment_vars = ["IMAGE_FOLDER=${local.image_folder}"]
     execute_command  = "source $HOME/.bash_profile; {{ .Vars }} {{ .Path }}"
     inline           = [
-      "pwsh -File \"${local.image_folder}/software-report/Generate-SoftwareReport.ps1\" -OutputDirectory \"${local.image_folder}/output/software-report\" -ImageName ${var.build_id}",
+      "pwsh -File \"${local.image_folder}/software-report/Generate-SoftwareReport.ps1\" -OutputDirectory \"${local.image_folder}/output\" -ImageName ${var.build_id}",
       "pwsh -File \"${local.image_folder}/tests/RunAll-Tests.ps1\""
     ]
   }
 
   provisioner "file" {
-    destination = "${path.root}/../../image-output/"
+    destination = "${path.root}/../../image-output/xcode-27-arm64-Readme.md"
     direction   = "download"
-    source      = "${local.image_folder}/output/"
+    source      = "${local.image_folder}/output/software-report.md"
+  }
+
+  provisioner "file" {
+    destination = "${path.root}/../../image-output/software-report.json"
+    direction   = "download"
+    source      = "${local.image_folder}/output/software-report.json"
   }
 
   provisioner "shell" {

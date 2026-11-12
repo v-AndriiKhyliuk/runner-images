@@ -248,7 +248,7 @@ function Get-PowerShellModules {
 }
 
 function Get-CachedDockerImagesTableData {
-    $allImages = docker images --digests --format "*{{.Repository}}:{{.Tag}}|{{.Digest}} |{{.CreatedAt}}"
+    $allImages = docker images --digests --format "*{{.Repository}}:{{.Tag}}|{{.Digest}}|{{.CreatedAt}}"
     if (-not $allImages) {
         return $null
     }
@@ -297,9 +297,9 @@ function Build-PackageManagementEnvironmentTable {
             "Name" = "VCPKG_INSTALLATION_ROOT"
             "Value" = $env:VCPKG_INSTALLATION_ROOT
         },
-        [PSCustomObject] @{
+        $(if (-not (Test-IsWin11-Arm64)) { [PSCustomObject] @{
             "Name" = "CONDA"
             "Value" = $env:CONDA
-        }
-    )
+        } })
+    ) | Where-Object { $_ }
 }

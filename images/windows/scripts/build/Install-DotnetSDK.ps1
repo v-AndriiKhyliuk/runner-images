@@ -76,17 +76,38 @@ function Install-DotnetSDK {
     }
 
     Write-Host "Installing dotnet $SDKVersion"
-    $zipPath = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+    $zipPath = Join-Path $env:TEMP_DIR ([IO.Path]::GetRandomFileName())
     & $InstallScriptPath -Version $SDKVersion -InstallDir $(Join-Path -Path $env:ProgramFiles -ChildPath 'dotnet') -ZipPath $zipPath -KeepZip
     # Installer is PowerShell script that doesn't set exit code on failure
     # If installation failed, tests will fail anyway
 
     #region Supply chain security
+    if (Test-IsArm64) {
+        $dotnetArch = "arm64"
+    } else {
+        $dotnetArch = "x64"
+    }
+    # dotnet-install downloads .tar.gz instead of .zip for .NET 11+ when tar is available
+    $archiveStream = [IO.File]::OpenRead($zipPath)
+    try {
+        $isGzip = ($archiveStream.ReadByte() -eq 0x1F) -and ($archiveStream.ReadByte() -eq 0x8B)
+    } finally {
+        $archiveStream.Dispose()
+    }
+    $archiveExtension = if ($isGzip) { "tar.gz" } else { "zip" }
+    $archiveName = "dotnet-sdk-win-$dotnetArch.$archiveExtension"
+
     $releasesJsonUri = "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/${DotnetVersion}/releases.json"
     $releasesData = (Invoke-DownloadWithRetry $releasesJsonUri) | Get-Item | Get-Content | ConvertFrom-Json
-    $distributorFileHash = $releasesData.releases.sdks.Where({ $_.version -eq $SDKVersion }).files.Where({ $_.name -eq 'dotnet-sdk-win-x64.zip' }).hash
+    $distributorFileHash = $releasesData.releases.sdks.Where({ $_.version -eq $SDKVersion }).files.Where({ $_.name -eq $archiveName }).hash
+    if (-not $distributorFileHash) {
+        throw "Unable to find SHA512 hash for $archiveName (SDK $SDKVersion) in $releasesJsonUri"
+    }
     Test-FileChecksum $zipPath -ExpectedSHA512Sum $distributorFileHash
     #endregion
+
+    # The archive is kept only for checksum validation; remove it to free disk space
+    Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
 }
 #endregion
 
@@ -97,16 +118,19 @@ $installScriptPath = Invoke-DownloadWithRetry -Url "https://dot.net/v1/dotnet-in
 
 # Visual Studio 2022 pre-creates sdk-manifests/8.0.100 folder, causing dotnet-install to skip manifests creation
 # https://github.com/actions/runner-images/issues/11402
-if ((Test-IsWin22) -or (Test-IsWin25)) {
-    $sdkManifestPath = "C:\Program Files\dotnet\sdk-manifests\8.0.100"
-    if (Test-Path $sdkManifestPath) {
-        Move-Item -Path $sdkManifestPath -Destination $env:TEMP_DIR -ErrorAction Stop
-    }
+$sdkManifestPath = "C:\Program Files\dotnet\sdk-manifests\8.0.100"
+if (Test-Path $sdkManifestPath) {
+    Move-Item -Path $sdkManifestPath -Destination $env:TEMP_DIR -ErrorAction Stop
 }
 
 # Install and warm up dotnet
 foreach ($dotnetVersion in $dotnetToolset.versions) {
     $sdkVersionsToInstall = Get-SDKVersionsToInstall -DotnetVersion $dotnetVersion
+
+    # Issue https://github.com/actions/runner-images/issues/13705
+    # Workaround for broken .NET SDK 10.0.103 - replace it with .NET SDK 10.0.102
+    $sdkVersionsToInstall = $sdkVersionsToInstall | ForEach-Object { if ($_ -eq "10.0.103") { Write-Host ".NET 10.0.103 detected, replacing with 10.0.102"; "10.0.102" } else { $_ } }
+
     foreach ($sdkVersion in $sdkVersionsToInstall) {
         Install-DotnetSDK -InstallScriptPath $installScriptPath -SDKVersion $sdkVersion -DotnetVersion $dotnetVersion
         if ($dotnetToolset.warmup) {
@@ -117,12 +141,10 @@ foreach ($dotnetVersion in $dotnetToolset.versions) {
 
 # Replace manifests inside sdk-manifests/8.0.100 folder with ones from Visual Studio
 # https://github.com/actions/runner-images/issues/11402
-if ((Test-IsWin22) -or (Test-IsWin25)) {
-    if (Test-Path "${env:TEMP_DIR}\8.0.100") {
-        Get-ChildItem -Path "${env:TEMP_DIR}\8.0.100" | ForEach-Object {
-            Remove-Item -Path "$sdkManifestPath\$($_.BaseName)" -Recurse -Force | Out-Null
-            Move-Item -Path $_.FullName -Destination $sdkManifestPath -Force -ErrorAction Stop
-        }
+if (Test-Path "${env:TEMP_DIR}\8.0.100") {
+    Get-ChildItem -Path "${env:TEMP_DIR}\8.0.100" | ForEach-Object {
+        Remove-Item -Path "$sdkManifestPath\$($_.BaseName)" -Recurse -Force | Out-Null
+        Move-Item -Path $_.FullName -Destination $sdkManifestPath -Force -ErrorAction Stop
     }
 }
 
@@ -150,6 +172,14 @@ foreach ($dotnetTool in $dotnetToolset.tools) {
     if ($LastExitCode -ne 0) {
         throw "Dotnet tool install failed with exit code $LastExitCode"
     }
+}
+
+# Compress the dotnet directory right away to keep enough free disk space until the end of the build.
+if (Test-IsWin25-X64) {
+    Write-Host "Compressing dotnet directory"
+    compact.exe /s:"$env:ProgramFiles\dotnet" /c /a /i /EXE:LZX * | Select-Object -Last 3
+    # compact.exe returns non-zero when some files cannot be compressed
+    $global:LASTEXITCODE = 0
 }
 
 Invoke-PesterTests -TestFile "DotnetSDK"

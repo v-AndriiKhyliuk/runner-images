@@ -76,12 +76,12 @@ variable "vcpu_count" {
 
 variable "ram_size" {
   type    = string
-  default = "24G"
+  default = "8G"
 }
 
 variable "image_os" {
   type    = string
-  default = "macos13"
+  default = "macos26"
 }
 
 source "veertu-anka-vm-clone" "template" {
@@ -91,6 +91,7 @@ source "veertu-anka-vm-clone" "template" {
   vcpu_count     = "${var.vcpu_count}"
   ram_size       = "${var.ram_size}"
   stop_vm        = "true"
+  log_level      = "debug"
 }
 
 source "null" "template" {
@@ -148,7 +149,7 @@ build {
 
   provisioner "file" {
     destination = "${local.image_folder}/toolset.json"
-    source      = "${path.root}/../toolsets/toolset-13.json"
+    source      = "${path.root}/../toolsets/toolset-26.json"
   }
 
   provisioner "shell" {
@@ -156,9 +157,8 @@ build {
     inline          = [
       "mv ${local.image_folder}/docs-gen ${local.image_folder}/software-report",
       "mkdir ~/utils",
-      "mv ${local.image_folder}/helpers/confirm-identified-developers-macos13.scpt ~/utils",
       "mv ${local.image_folder}/helpers/invoke-tests.sh ~/utils",
-      "mv ${local.image_folder}/helpers/utils.sh ~/utils",
+      "mv ${local.image_folder}/helpers/utils.sh ~/utils"
     ]
   }
 
@@ -205,17 +205,13 @@ build {
     scripts          = [
       "${path.root}/../scripts/build/configure-windows.sh",
       "${path.root}/../scripts/build/install-powershell.sh",
-      "${path.root}/../scripts/build/install-mono.sh",
       "${path.root}/../scripts/build/install-dotnet.sh",
       "${path.root}/../scripts/build/install-python.sh",
       "${path.root}/../scripts/build/install-azcopy.sh",
-      "${path.root}/../scripts/build/install-openssl.sh",
       "${path.root}/../scripts/build/install-ruby.sh",
       "${path.root}/../scripts/build/install-rubygems.sh",
       "${path.root}/../scripts/build/install-git.sh",
-      "${path.root}/../scripts/build/install-node.sh",
-      "${path.root}/../scripts/build/install-common-utils.sh",
-      "${path.root}/../scripts/build/install-unxip.sh"
+      "${path.root}/../scripts/build/install-node.sh"
     ]
   }
 
@@ -229,6 +225,15 @@ build {
     execute_command   = "source $HOME/.bash_profile; sudo {{ .Vars }} {{ .Path }}"
     expect_disconnect = true
     inline            = ["echo 'Reboot VM'", "shutdown -r now"]
+  }
+
+  provisioner "shell" {
+    environment_vars = ["API_PAT=${var.github_api_pat}", "USER_PASSWORD=${var.vm_password}", "IMAGE_FOLDER=${local.image_folder}"]
+    execute_command  = "chmod +x {{ .Path }}; source $HOME/.bash_profile; {{ .Vars }} {{ .Path }}"
+    pause_before     = "30s"
+    scripts          = [
+      "${path.root}/../scripts/build/install-common-utils.sh"
+    ]
   }
 
   provisioner "shell" {
@@ -248,11 +253,10 @@ build {
       "${path.root}/../scripts/build/install-vcpkg.sh",
       "${path.root}/../scripts/build/install-safari.sh",
       "${path.root}/../scripts/build/install-chrome.sh",
-      "${path.root}/../scripts/build/install-edge.sh",
       "${path.root}/../scripts/build/install-firefox.sh",
-      "${path.root}/../scripts/build/install-pypy.sh",
       "${path.root}/../scripts/build/install-bicep.sh",
-      "${path.root}/../scripts/build/install-codeql-bundle.sh"
+      "${path.root}/../scripts/build/install-codeql-bundle.sh",
+      "${path.root}/../scripts/build/install-edge.sh"
     ]
   }
 
@@ -273,21 +277,35 @@ build {
 
   provisioner "shell" {
     environment_vars = ["IMAGE_FOLDER=${local.image_folder}"]
+    execute_command  = "chmod +x {{ .Path }}; source $HOME/.bash_profile; {{ .Vars }} {{ .Path }}"
+    script           = "${path.root}/../scripts/build/remove-emudhra-certs.sh"
+  }
+
+  provisioner "shell" {
+    environment_vars = ["IMAGE_FOLDER=${local.image_folder}"]
+    execute_command  = "chmod +x {{ .Path }}; source $HOME/.bash_profile; {{ .Vars }} {{ .Path }}"
+    script           = "${path.root}/../scripts/build/install-openssl.sh"
+  }
+
+  provisioner "shell" {
+    environment_vars = ["IMAGE_FOLDER=${local.image_folder}"]
     execute_command  = "source $HOME/.bash_profile; {{ .Vars }} {{ .Path }}"
     inline           = [
-      "pwsh -File \"${local.image_folder}/software-report/Generate-SoftwareReport.ps1\" -OutputDirectory \"${local.image_folder}/output/software-report\" -ImageName ${var.build_id}",
+      "pwsh -File \"${local.image_folder}/software-report/Generate-SoftwareReport.ps1\" -OutputDirectory \"${local.image_folder}/output\" -ImageName ${var.build_id}",
       "pwsh -File \"${local.image_folder}/tests/RunAll-Tests.ps1\""
     ]
   }
 
   provisioner "file" {
-    destination = "${path.root}/../../image-output/"
+    destination = "${path.root}/../../image-output/macos-26-Readme.md"
     direction   = "download"
-    source      = "${local.image_folder}/output/"
+    source      = "${local.image_folder}/output/software-report.md"
   }
 
-  provisioner "shell" {
-    inline = ["rm -rf \"$(brew --cache)\""]
+  provisioner "file" {
+    destination = "${path.root}/../../image-output/software-report.json"
+    direction   = "download"
+    source      = "${local.image_folder}/output/software-report.json"
   }
 
   provisioner "shell" {
